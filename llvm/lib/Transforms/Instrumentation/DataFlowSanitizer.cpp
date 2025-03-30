@@ -25,34 +25,19 @@
 /// shadow byte can represent up to 8 labels. On Linux/x86_64, memory is then
 /// laid out as follows:
 ///
-/// +--------------------+ 0x800000000000 (top of memory)
-/// |    application 3   |
-/// +--------------------+ 0x700000000000
-/// |      invalid       |
-/// +--------------------+ 0x610000000000
-/// |      origin 1      |
-/// +--------------------+ 0x600000000000
-/// |    application 2   |
-/// +--------------------+ 0x510000000000
-/// |      shadow 1      |
-/// +--------------------+ 0x500000000000
-/// |      invalid       |
-/// +--------------------+ 0x400000000000
-/// |      origin 3      |
-/// +--------------------+ 0x300000000000
-/// |      shadow 3      |
-/// +--------------------+ 0x200000000000
-/// |      origin 2      |
-/// +--------------------+ 0x110000000000
-/// |      invalid       |
-/// +--------------------+ 0x100000000000
-/// |      shadow 2      |
-/// +--------------------+ 0x010000000000
-/// |    application 1   |
-/// +--------------------+ 0x000000000000
+/// +--------------------+ 0xffffffffffffffff (top of memory)
+/// |    KAPP            |
+/// +--------------------+ 0xffff200000000000 (Kmem)
+/// |     KASAN          |
+/// +--------------------+ 0xffff000000000000 (KASAN)
+/// |      shadow        |
+/// +--------------------+ 0x0000200000000000 (shadow mem)
+
 ///
-/// MEM_TO_SHADOW(mem) = mem ^ 0x500000000000
-/// SHADOW_TO_ORIGIN(shadow) = shadow + 0x100000000000
+///
+/// MEM_TO_SHADOW(mem) = mem ^ 0xffff000000000000
+///
+/// origin no support 
 ///
 /// For more information, please refer to the design document:
 /// http://clang.llvm.org/docs/DataFlowSanitizerDesign.html
@@ -291,7 +276,7 @@ struct MemoryMapParams {
 // aarch64 Linux
 const MemoryMapParams Linux_AArch64_MemoryMapParams = {
     0,               // AndMask (not used)
-    0x0B00000000000, // XorMask
+    0xffff000000000000, // XorMask
     0,               // ShadowBase (not used)
     0x0200000000000, // OriginBase
 };
@@ -299,7 +284,7 @@ const MemoryMapParams Linux_AArch64_MemoryMapParams = {
 // x86_64 Linux
 const MemoryMapParams Linux_X86_64_MemoryMapParams = {
     0,              // AndMask (not used)
-    0x500000000000, // XorMask
+    0xffff000000000000, // XorMask
     0,              // ShadowBase (not used)
     0x100000000000, // OriginBase
 };
@@ -1490,6 +1475,52 @@ void DataFlowSanitizer::initializeCallbackFunctions(Module &M) {
         Mod->getOrInsertFunction("__dfsan_reaches_function_callback_origin",
                                  DFSanReachesFunctionCallbackOriginFnTy, AL);
   }
+}
+
+bool Instrument_Uaf(Module &M) {
+  LLVMContext &Ctx = M.getContext();
+  bool IsInstrumented = false;
+  for(auto &F : M) {
+    for(auto &BB : F) {
+      for (auto &I : BB) {
+        if (isa<CallInst>(I)) {
+          CallInst *CI = cast<CallInst>(&I);
+          //test if addr is tainted 
+          if (Function *Callee = CI->getCalledFunction()) {
+            //check if the function is direct call
+            continue;
+          }
+          else{
+            Value *Func_Ptr = CI->getArgOperand(0); 
+            //make a taint wrapping function
+            FunctionCallee TaintWrapper_call=
+                M.getOrInsertFunction("__dfsan_taint_wrapper_call", 
+                FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
+            IRBuilder<> IRB(&I);
+            IRB.CreateCall(TaintWrapper_call, {Func_Ptr});
+            IsInstrumented = true;
+          }
+        }
+        if(isa<StoreInst>(I)) {
+          StoreInst *SI = cast<StoreInst>(&I);
+          Value *Addr = SI->getPointerOperand();
+          //check if addr is tainted
+          if (isa<GlobalVariable>(Addr)) {
+            continue;
+          }
+          else{
+            FunctionCallee TaintWrapper_store =
+                M.getOrInsertFunction("__dfsan_taint_wrapper_store", 
+                FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
+            IRBuilder<> IRB(&I);
+            IRB.CreateCall(TaintWrapper_store, {Addr});
+            IsInstrumented = true;
+          }
+        }
+      }
+    } 
+  }
+  return IsInstrumented;
 }
 
 bool DataFlowSanitizer::runImpl(
