@@ -1530,6 +1530,8 @@ bool DataFlowSanitizer::runImpl(
   if (ABIList.isIn(M, "skip"))
     return false;
 
+  bool uaf=Instrument_Uaf(M);
+
   const unsigned InitialGlobalSize = M.global_size();
   const unsigned InitialModuleSize = M.size();
 
@@ -1813,7 +1815,7 @@ bool DataFlowSanitizer::runImpl(
   }
 
   return Changed || !FnsToInstrument.empty() ||
-         M.global_size() != InitialGlobalSize || M.size() != InitialModuleSize;
+         M.global_size() != InitialGlobalSize || M.size() != InitialModuleSize || uaf;
 }
 
 Value *DFSanFunction::getArgTLS(Type *T, unsigned ArgOffset, IRBuilder<> &IRB) {
