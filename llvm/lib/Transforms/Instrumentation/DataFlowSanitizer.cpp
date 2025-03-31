@@ -1550,10 +1550,11 @@ bool DataFlowSanitizer::runImpl(
   auto GetOrInsertGlobal = [this, &Changed](StringRef Name,
                                             Type *Ty) -> Constant * {
     Constant *C = Mod->getOrInsertGlobal(Name, Ty);
-    if (GlobalVariable *G = dyn_cast<GlobalVariable>(C)) {
-      Changed |= G->getThreadLocalMode() != GlobalVariable::InitialExecTLSModel;
-      G->setThreadLocalMode(GlobalVariable::InitialExecTLSModel);
-    }
+    // TODO: For KDFSAN, call runtime lib to get ptr to TLS (like KMSAN)
+    //if (GlobalVariable *G = dyn_cast<GlobalVariable>(C)) {
+    //  Changed |= G->getThreadLocalMode() != GlobalVariable::InitialExecTLSModel;
+    //  G->setThreadLocalMode(GlobalVariable::InitialExecTLSModel);
+    //}
     return C;
   };
 
