@@ -1208,7 +1208,7 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
       FunctionType::get(Type::getVoidTy(*Ctx), DFSanLoadStoreCallbackArgs,
                         /*isVarArg=*/false);
   Type *DFSanMemTransferCallbackArgs[3] =
-      { Type::getInt8PtrTy(*Ctx), Type::getInt8PtrTy(*Ctx), IntptrTy };
+      { Int8Ptr, Int8Ptr, IntptrTy };
   DFSanMemTransferCallbackFnTy =
       FunctionType::get(Type::getVoidTy(*Ctx), DFSanMemTransferCallbackArgs,
                         /*isVarArg=*/false);
@@ -2966,11 +2966,11 @@ void DFSanVisitor::visitMemSetInst(MemSetInst &I) {
 }
 
 void DFSanVisitor::visitMemTransferInst(MemTransferInst &I) {
-  Type *Int8Ptr = Type::getInt8PtrTy(*DFSF.DFS.Ctx);
+  Type *Int8Ptr = PointerType::getUnqual(*DFSF.DFS.Ctx);
   IRBuilder<> IRB(&I);
 
   // KDFsan memtransfer is achieved by callback
-  if (DFSF.DFS.InsertCallbacks) {
+  if (ClEventCallbacks) {
     Value *Dest = IRB.CreateBitCast(I.getDest(), Int8Ptr);
     Value *Src = IRB.CreateBitCast(I.getSource(), Int8Ptr);
     Value *Size = IRB.CreateZExtOrTrunc(I.getLength(), DFSF.DFS.IntptrTy);
@@ -3512,3 +3512,4 @@ PreservedAnalyses DataFlowSanitizerPass::run(Module &M,
   PA.abandon<GlobalsAA>();
   return PA;
 }
+
