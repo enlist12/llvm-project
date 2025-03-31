@@ -1491,18 +1491,26 @@ bool Instrument_Uaf(Module &M) {
             continue;
           }
           else{
-            Value *Func_Ptr = CI->getArgOperand(0); 
+            Value *Func_Ptr = CI->getCalledOperand(); 
+            if(!Func_Ptr->getType()->isPointerTy()) {
+              continue;
+            }
             //make a taint wrapping function
             FunctionCallee TaintWrapper_call=
                 M.getOrInsertFunction("__dfsan_taint_wrapper_call", 
                 FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
             IRBuilder<> IRB(&I);
-            IRB.CreateCall(TaintWrapper_call, {Func_Ptr});
+            Value* AddrInt=IRB.CreatePtrToInt(Func_Ptr, Type::getInt64Ty(Ctx));
+            IRB.CreateCall(TaintWrapper_call, {AddrInt});
             IsInstrumented = true;
           }
         }
         if(isa<StoreInst>(I)) {
           StoreInst *SI = cast<StoreInst>(&I);
+          //May unused
+          if(!SI->getPointerOperandType()->isPointerTy()) {
+            continue;
+          }
           Value *Addr = SI->getPointerOperand();
           //check if addr is tainted
           if (isa<GlobalVariable>(Addr)) {
@@ -1513,7 +1521,8 @@ bool Instrument_Uaf(Module &M) {
                 M.getOrInsertFunction("__dfsan_taint_wrapper_store", 
                 FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
             IRBuilder<> IRB(&I);
-            IRB.CreateCall(TaintWrapper_store, {Addr});
+            Value* AddrInt = IRB.CreatePtrToInt(Addr, Type::getInt64Ty(Ctx));
+            IRB.CreateCall(TaintWrapper_store, {AddrInt});
             IsInstrumented = true;
           }
         }
