@@ -193,7 +193,7 @@ static cl::opt<bool> ClDebugNonzeroLabels(
 // following callback functions:
 //   void __dfsan_load_callback(dfsan_label Label, void* addr);
 //   void __dfsan_store_callback(dfsan_label Label, void* addr);
-//   void __dfsan_mem_transfer_callback(dfsan_label *Start, size_t Len);
+//   void __dfsan_mem_transfer_callback(void *dest, const void *src, uptr size);
 //   void __dfsan_cmp_callback(dfsan_label CombinedLabel);
 static cl::opt<bool> ClEventCallbacks(
     "dfsan-event-callbacks",
@@ -1207,7 +1207,8 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   DFSanLoadStoreCallbackFnTy =
       FunctionType::get(Type::getVoidTy(*Ctx), DFSanLoadStoreCallbackArgs,
                         /*isVarArg=*/false);
-  Type *DFSanMemTransferCallbackArgs[2] = {PrimitiveShadowPtrTy, IntptrTy};
+  Type *DFSanMemTransferCallbackArgs[3] =
+      { Type::getInt8PtrTy(*Ctx), Type::getInt8PtrTy(*Ctx), IntptrTy };
   DFSanMemTransferCallbackFnTy =
       FunctionType::get(Type::getVoidTy(*Ctx), DFSanMemTransferCallbackArgs,
                         /*isVarArg=*/false);
@@ -2965,31 +2966,15 @@ void DFSanVisitor::visitMemSetInst(MemSetInst &I) {
 }
 
 void DFSanVisitor::visitMemTransferInst(MemTransferInst &I) {
+  Type *Int8Ptr = Type::getInt8PtrTy(*DFSF.DFS.Ctx);
   IRBuilder<> IRB(&I);
 
-  // CopyOrMoveOrigin transfers origins by refering to their shadows. So we
-  // need to move origins before moving shadows.
-  if (DFSF.DFS.shouldTrackOrigins()) {
-    IRB.CreateCall(
-        DFSF.DFS.DFSanMemOriginTransferFn,
-        {I.getArgOperand(0), I.getArgOperand(1),
-         IRB.CreateIntCast(I.getArgOperand(2), DFSF.DFS.IntptrTy, false)});
-  }
-
-  Value *DestShadow = DFSF.DFS.getShadowAddress(I.getDest(), I.getIterator());
-  Value *SrcShadow = DFSF.DFS.getShadowAddress(I.getSource(), I.getIterator());
-  Value *LenShadow =
-      IRB.CreateMul(I.getLength(), ConstantInt::get(I.getLength()->getType(),
-                                                    DFSF.DFS.ShadowWidthBytes));
-  auto *MTI = cast<MemTransferInst>(
-      IRB.CreateCall(I.getFunctionType(), I.getCalledOperand(),
-                     {DestShadow, SrcShadow, LenShadow, I.getVolatileCst()}));
-  MTI->setDestAlignment(DFSF.getShadowAlign(I.getDestAlign().valueOrOne()));
-  MTI->setSourceAlignment(DFSF.getShadowAlign(I.getSourceAlign().valueOrOne()));
-  if (ClEventCallbacks) {
-    IRB.CreateCall(
-        DFSF.DFS.DFSanMemTransferCallbackFn,
-        {DestShadow, IRB.CreateZExtOrTrunc(I.getLength(), DFSF.DFS.IntptrTy)});
+  // KDFsan memtransfer is achieved by callback
+  if (DFSF.DFS.InsertCallbacks) {
+    Value *Dest = IRB.CreateBitCast(I.getDest(), Int8Ptr);
+    Value *Src = IRB.CreateBitCast(I.getSource(), Int8Ptr);
+    Value *Size = IRB.CreateZExtOrTrunc(I.getLength(), DFSF.DFS.IntptrTy);
+    IRB.CreateCall(DFSF.DFS.DFSanMemTransferCallbackFn, {Dest, Src, Size});
   }
 }
 

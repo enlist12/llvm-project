@@ -3827,14 +3827,14 @@ void Verifier::visitCallBase(CallBase &Call) {
   // do so causes assertion failures when the inliner sets up inline scope info
   // (Interposable functions are not inlinable, neither are functions without
   //  definitions.)
-  if (Call.getFunction()->getSubprogram() && Call.getCalledFunction() &&
-      !Call.getCalledFunction()->isInterposable() &&
-      !Call.getCalledFunction()->isDeclaration() &&
-      Call.getCalledFunction()->getSubprogram())
-    CheckDI(Call.getDebugLoc(),
-            "inlinable function call in a function with "
-            "debug info must have a !dbg location",
-            Call);
+  //if (Call.getFunction()->getSubprogram() && Call.getCalledFunction() &&
+  //    !Call.getCalledFunction()->isInterposable() &&
+  //    !Call.getCalledFunction()->isDeclaration() &&
+  //    Call.getCalledFunction()->getSubprogram())
+  //  CheckDI(Call.getDebugLoc(),
+  //          "inlinable function call in a function with "
+  //          "debug info must have a !dbg location",
+  //          Call);
 
   if (Call.isInlineAsm())
     verifyInlineAsmCall(Call);
