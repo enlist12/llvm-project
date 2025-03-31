@@ -1484,29 +1484,29 @@ bool Instrument_Uaf(Module &M) {
   for(auto &F : M) {
     for(auto &BB : F) {
       for (auto &I : BB) {
-        if (isa<CallInst>(I)) {
-          CallInst *CI = cast<CallInst>(&I);
-          //test if addr is tainted 
-          if (Function *Callee = CI->getCalledFunction()) {
-            //check if the function is direct call
+        if (isa<CallBase>(I)) {
+          CallBase *CI = cast<CallBase>(&I);
+          //if Inlineasm, get ptr addr is illegal
+          if(CI->isInlineAsm()) {
             continue;
           }
-          else{
-            Value *Func_Ptr = CI->getCalledOperand(); 
-            if(!Func_Ptr->getType()->isPointerTy()) {
+          //test if addr is tainted 
+          if (!CI->isIndirectCall())
+            continue;
+          Value *Func_Ptr = CI->getCalledOperand(); 
+          if(!Func_Ptr->getType()->isPointerTy()) {
               continue;
-            }
-            //make a taint wrapping function
-            FunctionCallee TaintWrapper_call=
-                M.getOrInsertFunction("__dfsan_taint_wrapper_call", 
-                FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
-            IRBuilder<> IRB(&I);
-            Value* AddrInt=IRB.CreatePtrToInt(Func_Ptr, Type::getInt64Ty(Ctx));
-            IRB.CreateCall(TaintWrapper_call, {AddrInt});
-            IsInstrumented = true;
           }
+          //make a taint wrapping function
+          FunctionCallee TaintWrapper_call=
+              M.getOrInsertFunction("__dfsan_taint_wrapper_call", 
+              FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
+          IRBuilder<> IRB(&I);
+          Value* AddrInt=IRB.CreatePtrToInt(Func_Ptr, Type::getInt64Ty(Ctx));
+          IRB.CreateCall(TaintWrapper_call, {AddrInt});
+          IsInstrumented = true;
         }
-        if(isa<StoreInst>(I)) {
+        else if(isa<StoreInst>(I)) {
           StoreInst *SI = cast<StoreInst>(&I);
           //May unused
           if(!SI->getPointerOperandType()->isPointerTy()) {
@@ -3343,6 +3343,10 @@ void DFSanVisitor::visitLibAtomicCompareExchange(CallBase &CB) {
 
 void DFSanVisitor::visitCallBase(CallBase &CB) {
   Function *F = CB.getCalledFunction();
+  if (CB.isInlineAsm()){
+    DFSF.setShadow(&CB, DFSF.DFS.getZeroShadow(&CB));
+    return;
+  }
   if ((F && F->isIntrinsic()) || CB.isInlineAsm()) {
     visitInstOperands(CB);
     return;
