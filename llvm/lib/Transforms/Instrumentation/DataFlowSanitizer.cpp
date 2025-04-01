@@ -1486,69 +1486,12 @@ void DataFlowSanitizer::initializeCallbackFunctions(Module &M) {
   }
 }
 
-bool Instrument_Uaf(Module &M) {
-  LLVMContext &Ctx = M.getContext();
-  bool IsInstrumented = false;
-  for(auto &F : M) {
-    for(auto &BB : F) {
-      for (auto &I : BB) {
-        if (isa<CallBase>(I)) {
-          CallBase *CI = cast<CallBase>(&I);
-          //if Inlineasm, get ptr addr is illegal
-          if(CI->isInlineAsm()) {
-            continue;
-          }
-          //test if addr is tainted 
-          if (!CI->isIndirectCall())
-            continue;
-          Value *Func_Ptr = CI->getCalledOperand(); 
-          if(!Func_Ptr->getType()->isPointerTy()) {
-              continue;
-          }
-          //make a taint wrapping function
-          FunctionCallee TaintWrapper_call=
-              M.getOrInsertFunction("__dfsan_taint_wrapper_call", 
-              FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
-          IRBuilder<> IRB(&I);
-          Value* AddrInt=IRB.CreatePtrToInt(Func_Ptr, Type::getInt64Ty(Ctx));
-          IRB.CreateCall(TaintWrapper_call, {AddrInt});
-          IsInstrumented = true;
-        }
-        else if(isa<StoreInst>(I)) {
-          StoreInst *SI = cast<StoreInst>(&I);
-          //May unused
-          if(!SI->getPointerOperandType()->isPointerTy()) {
-            continue;
-          }
-          Value *Addr = SI->getPointerOperand();
-          //check if addr is tainted
-          if (isa<GlobalVariable>(Addr)) {
-            continue;
-          }
-          else{
-            FunctionCallee TaintWrapper_store =
-                M.getOrInsertFunction("__dfsan_taint_wrapper_store", 
-                FunctionType::get(Type::getVoidTy(Ctx), Type::getInt64Ty(Ctx), false));
-            IRBuilder<> IRB(&I);
-            Value* AddrInt = IRB.CreatePtrToInt(Addr, Type::getInt64Ty(Ctx));
-            IRB.CreateCall(TaintWrapper_store, {AddrInt});
-            IsInstrumented = true;
-          }
-        }
-      }
-    } 
-  }
-  return IsInstrumented;
-}
-
 bool DataFlowSanitizer::runImpl(
     Module &M, llvm::function_ref<TargetLibraryInfo &(Function &)> GetTLI) {
   initializeModule(M);
 
   if (ABIList.isIn(M, "skip"))
     return false;
-
-  bool uaf=Instrument_Uaf(M);
 
   const unsigned InitialGlobalSize = M.global_size();
   const unsigned InitialModuleSize = M.size();
@@ -1736,6 +1679,8 @@ bool DataFlowSanitizer::runImpl(
       *FI = nullptr;
     }
   }
+
+  bool uaf= false;
 
   for (Function *F : FnsToInstrument) {
     if (!F || F->isDeclaration())
@@ -2648,7 +2593,19 @@ void DFSanFunction::storePrimitiveShadowOrigin(Value *Addr, uint64_t Size,
   }
 
   if(KDFSAN){
-    IRBuilder<> IRB(Pos->getParent(), Pos);
+    Module *M=Pos->getModule();
+    StoreInst *SI=dyn_cast<StoreInst>(Pos);
+    Value *Addr = SI->getPointerOperand();
+    //check if addr is tainted
+    if (!isa<GlobalVariable>(Addr)) {
+      Value* Shadow=getShadow(Addr);
+      FunctionCallee TaintWrapper_store =
+          M->getOrInsertFunction("__dfsan_taint_wrapper_store", 
+          FunctionType::get(Type::getVoidTy(*DFS.Ctx), DFS.PrimitiveShadowTy, false));
+      IRBuilder<> IRB(Pos->getParent(),Pos);
+      IRB.CreateCall(TaintWrapper_store, {Shadow});
+    }
+    IRBuilder<> IRB(Pos->getParent(),Pos);
     CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanSetLabelFn,
         {PrimitiveShadow,IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
         ConstantInt::get(DFS.IntptrTy, Size)});
@@ -3371,6 +3328,16 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
   if (CB.isInlineAsm()){
     DFSF.setShadow(&CB, DFSF.DFS.getZeroShadow(&CB));
     return;
+  }
+  if(CB.isIndirectCall()){
+    Module *M=CB.getModule();
+    Value* Shadow=
+        DFSF.getShadow(CB.getCalledOperand());
+    FunctionCallee TaintWrapper_store =
+    M->getOrInsertFunction("__dfsan_taint_wrapper_call", 
+    FunctionType::get(Type::getVoidTy(*DFSF.DFS.Ctx), DFSF.DFS.PrimitiveShadowTy, false));
+    IRBuilder<> IRB(&CB);
+    IRB.CreateCall(TaintWrapper_store, {Shadow});
   }
   if ((F && F->isIntrinsic()) || CB.isInlineAsm()) {
     visitInstOperands(CB);
