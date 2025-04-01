@@ -1680,8 +1680,6 @@ bool DataFlowSanitizer::runImpl(
     }
   }
 
-  bool uaf= false;
-
   for (Function *F : FnsToInstrument) {
     if (!F || F->isDeclaration())
       continue;
@@ -1779,7 +1777,7 @@ bool DataFlowSanitizer::runImpl(
   }
 
   return Changed || !FnsToInstrument.empty() ||
-         M.global_size() != InitialGlobalSize || M.size() != InitialModuleSize || uaf;
+         M.global_size() != InitialGlobalSize || M.size() != InitialModuleSize ;
 }
 
 Value *DFSanFunction::getArgTLS(Type *T, unsigned ArgOffset, IRBuilder<> &IRB) {
