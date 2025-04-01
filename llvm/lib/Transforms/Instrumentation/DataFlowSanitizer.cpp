@@ -25,15 +25,7 @@
 /// shadow byte can represent up to 8 labels. On Linux/x86_64, memory is then
 /// laid out as follows:
 ///
-/// +--------------------+ 0xffffffffffffffff (top of memory)
-/// |    KAPP            |
-/// +--------------------+ 0xffff200000000000 (Kmem)
-/// |     KASAN          |
-/// +--------------------+ 0xffff000000000000 (KASAN)
-/// |      shadow        |
-/// +--------------------+ 0x0000200000000000 (shadow mem)
-
-///
+///For KDFSan , no map regularly
 ///
 /// MEM_TO_SHADOW(mem) = mem ^ 0xffff000000000000
 ///
@@ -101,6 +93,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+#define KDFSAN true
 
 using namespace llvm;
 
@@ -461,6 +455,7 @@ class DataFlowSanitizer {
   FunctionType *DFSanCmpCallbackFnTy;
   FunctionType *DFSanLoadStoreCallbackFnTy;
   FunctionType *DFSanMemTransferCallbackFnTy;
+  FunctionType *DFSanReadLabelFnTy;
   FunctionType *DFSanChainOriginFnTy;
   FunctionType *DFSanChainOriginIfTaintedFnTy;
   FunctionType *DFSanMemOriginTransferFnTy;
@@ -486,6 +481,7 @@ class DataFlowSanitizer {
   FunctionCallee DFSanChainOriginIfTaintedFn;
   FunctionCallee DFSanMemOriginTransferFn;
   FunctionCallee DFSanMemShadowOriginTransferFn;
+  FunctionCallee DFSanReadLabelFn;
   FunctionCallee DFSanMemShadowOriginConditionalExchangeFn;
   FunctionCallee DFSanMaybeStoreOriginFn;
   SmallPtrSet<Value *, 16> DFSanRuntimeFunctions;
@@ -1212,7 +1208,9 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   DFSanMemTransferCallbackFnTy =
       FunctionType::get(Type::getVoidTy(*Ctx), DFSanMemTransferCallbackArgs,
                         /*isVarArg=*/false);
-
+  Type *DFSanReadLabelArgs[2] = { Int8Ptr, IntptrTy };
+  DFSanReadLabelFnTy = 
+        FunctionType::get(PrimitiveShadowTy, DFSanReadLabelArgs, /*isVarArg=*/ false);
   ColdCallWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   OriginStoreWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   return true;
@@ -1364,6 +1362,14 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     DFSanChainOriginIfTaintedFn = Mod->getOrInsertFunction(
         "__dfsan_chain_origin_if_tainted", DFSanChainOriginIfTaintedFnTy, AL);
   }
+  {
+    AttributeList AL;
+    AL = AL.addFnAttribute(M.getContext(),Attribute::NoUnwind);
+    AL = AL.addFnAttribute(M.getContext(),Attribute::ReadOnly);
+    AL = AL.addRetAttribute(M.getContext(), Attribute::ZExt);
+    DFSanReadLabelFn =
+        Mod->getOrInsertFunction("__dfsan_read_label", DFSanReadLabelFnTy, AL);
+  }
   DFSanMemOriginTransferFn = Mod->getOrInsertFunction(
       "__dfsan_mem_origin_transfer", DFSanMemOriginTransferFnTy);
 
@@ -1382,6 +1388,8 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
         "__dfsan_maybe_store_origin", DFSanMaybeStoreOriginFnTy, AL);
   }
 
+  DFSanRuntimeFunctions.insert(
+      DFSanReadLabelFn.getCallee()->stripPointerCasts());
   DFSanRuntimeFunctions.insert(
       DFSanUnionLoadFn.getCallee()->stripPointerCasts());
   DFSanRuntimeFunctions.insert(
@@ -2313,6 +2321,15 @@ std::pair<Value *, Value *> DFSanFunction::loadShadowOriginSansLoadTracking(
     return {DFS.ZeroPrimitiveShadow,
             ShouldTrackOrigins ? DFS.ZeroOrigin : nullptr};
 
+  if(KDFSAN){
+    IRBuilder<> IRB(Pos->getParent());
+    CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanReadLabelFn,
+        {IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
+        ConstantInt::get(DFS.IntptrTy, Size)});
+    FallbackCall->addParamAttr(AttributeList::ReturnIndex, Attribute::ZExt);
+    return {FallbackCall,
+            ShouldTrackOrigins ? DFS.ZeroOrigin : nullptr};;
+  }
   // Use callback to load if this is not an optimizable case for origin
   // tracking.
   if (ShouldTrackOrigins &&
@@ -2628,6 +2645,14 @@ void DFSanFunction::storePrimitiveShadowOrigin(Value *Addr, uint64_t Size,
       }
       return;
     }
+  }
+
+  if(KDFSAN){
+    IRBuilder<> IRB(Pos->getParent(), Pos);
+    CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanSetLabelFn,
+        {PrimitiveShadow,IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
+        ConstantInt::get(DFS.IntptrTy, Size)});
+    return;
   }
 
   const Align ShadowAlign = getShadowAlign(InstAlignment);
