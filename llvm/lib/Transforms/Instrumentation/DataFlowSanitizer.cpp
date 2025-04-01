@@ -456,6 +456,8 @@ class DataFlowSanitizer {
   FunctionType *DFSanLoadStoreCallbackFnTy;
   FunctionType *DFSanMemTransferCallbackFnTy;
   FunctionType *DFSanReadLabelFnTy;
+  FunctionType *DFSanWrapStoreFnTy;
+  FunctionType *DFSanWrapCallFnTy;
   FunctionType *DFSanChainOriginFnTy;
   FunctionType *DFSanChainOriginIfTaintedFnTy;
   FunctionType *DFSanMemOriginTransferFnTy;
@@ -467,6 +469,8 @@ class DataFlowSanitizer {
   FunctionCallee DFSanUnimplementedFn;
   FunctionCallee DFSanWrapperExternWeakNullFn;
   FunctionCallee DFSanSetLabelFn;
+  FunctionCallee DFSanWrapStoreFn;
+  FunctionCallee DFSanWrapCallFn;
   FunctionCallee DFSanNonzeroLabelFn;
   FunctionCallee DFSanVarargWrapperFn;
   FunctionCallee DFSanLoadCallbackFn;
@@ -1211,6 +1215,12 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   Type *DFSanReadLabelArgs[2] = { Int8Ptr, IntptrTy };
   DFSanReadLabelFnTy = 
         FunctionType::get(PrimitiveShadowTy, DFSanReadLabelArgs, /*isVarArg=*/ false);
+  Type *DFSanWrapStoreArgs = { PrimitiveShadowTy };
+  DFSanWrapStoreFnTy = 
+        FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapStoreArgs, /*isVarArg=*/ false);
+  Type *DFSanWrapCallArgs = { PrimitiveShadowTy };
+  DFSanWrapCallFnTy = 
+        FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapCallArgs, /*isVarArg=*/ false);
   ColdCallWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   OriginStoreWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   return true;
@@ -1332,6 +1342,20 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     DFSanLoadLabelAndOriginFn = Mod->getOrInsertFunction(
         "__dfsan_load_label_and_origin", DFSanLoadLabelAndOriginFnTy, AL);
   }
+  {
+    AttributeList AL;
+    AL = AL.addFnAttribute(C, Attribute::NoUnwind);
+    AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
+    DFSanWrapStoreFn = Mod->getOrInsertFunction(
+        "__dfsan_taint_wrapper_store", DFSanWrapStoreFnTy, AL);
+  }
+  {
+    AttributeList AL;
+    AL = AL.addFnAttribute(C, Attribute::NoUnwind);
+    AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
+    DFSanWrapCallFn = Mod->getOrInsertFunction(
+        "__dfsan_taint_wrapper_call", DFSanWrapStoreFnTy, AL);
+  }
   DFSanUnimplementedFn =
       Mod->getOrInsertFunction("__dfsan_unimplemented", DFSanUnimplementedFnTy);
   DFSanWrapperExternWeakNullFn = Mod->getOrInsertFunction(
@@ -1433,6 +1457,10 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
           ->stripPointerCasts());
   DFSanRuntimeFunctions.insert(
       DFSanMaybeStoreOriginFn.getCallee()->stripPointerCasts());
+  DFSanRuntimeFunctions.insert(
+      DFSanWrapCallFn.getCallee()->stripPointerCasts());
+  DFSanRuntimeFunctions.insert(
+      DFSanWrapStoreFn.getCallee()->stripPointerCasts());
 }
 
 // Initializes event callback functions and declare them in the module
@@ -2597,11 +2625,8 @@ void DFSanFunction::storePrimitiveShadowOrigin(Value *Addr, uint64_t Size,
     //check if addr is tainted
     if (!isa<GlobalVariable>(Addr)) {
       Value* Shadow=getShadow(Addr);
-      FunctionCallee TaintWrapper_store =
-          M->getOrInsertFunction("__dfsan_taint_wrapper_store", 
-          FunctionType::get(Type::getVoidTy(*DFS.Ctx), DFS.PrimitiveShadowTy, false));
       IRBuilder<> IRB(Pos->getParent(),Pos);
-      IRB.CreateCall(TaintWrapper_store, {Shadow});
+      IRB.CreateCall(DFS.DFSanWrapStoreFn, {Shadow});
     }
     IRBuilder<> IRB(Pos->getParent(),Pos);
     CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanSetLabelFn,
@@ -3331,11 +3356,8 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
     Module *M=CB.getModule();
     Value* Shadow=
         DFSF.getShadow(CB.getCalledOperand());
-    FunctionCallee TaintWrapper_store =
-    M->getOrInsertFunction("__dfsan_taint_wrapper_call", 
-    FunctionType::get(Type::getVoidTy(*DFSF.DFS.Ctx), DFSF.DFS.PrimitiveShadowTy, false));
     IRBuilder<> IRB(&CB);
-    IRB.CreateCall(TaintWrapper_store, {Shadow});
+    IRB.CreateCall(DFSF.DFS.DFSanWrapCallFn, {Shadow});
   }
   if ((F && F->isIntrinsic()) || CB.isInlineAsm()) {
     visitInstOperands(CB);
