@@ -1150,7 +1150,7 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   DFSanWrapperExternWeakNullFnTy =
       FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapperExternWeakNullArgs,
                         /*isVarArg=*/false);
-  Type *DFSanSetLabelArgs[4] = {PrimitiveShadowTy, OriginTy,
+  Type *DFSanSetLabelArgs[3] = {PrimitiveShadowTy,
                                 PointerType::getUnqual(*Ctx), IntptrTy};
   DFSanSetLabelFnTy = FunctionType::get(Type::getVoidTy(*Ctx),
                                         DFSanSetLabelArgs, /*isVarArg=*/false);
@@ -2987,7 +2987,7 @@ void DFSanVisitor::visitMemSetInst(MemSetInst &I) {
                          ? DFSF.getOrigin(I.getValue())
                          : DFSF.DFS.ZeroOrigin;
   IRB.CreateCall(DFSF.DFS.DFSanSetLabelFn,
-                 {ValShadow, ValOrigin, I.getDest(),
+                 {ValShadow, I.getDest(),
                   IRB.CreateZExtOrTrunc(I.getLength(), DFSF.DFS.IntptrTy)});
 }
 
