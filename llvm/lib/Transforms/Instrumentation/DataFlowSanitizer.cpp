@@ -1363,7 +1363,6 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
   {
     AttributeList AL;
     AL = AL.addParamAttribute(M.getContext(), 0, Attribute::ZExt);
-    AL = AL.addParamAttribute(M.getContext(), 1, Attribute::ZExt);
     DFSanSetLabelFn =
         Mod->getOrInsertFunction("__dfsan_set_label", DFSanSetLabelFnTy, AL);
   }
@@ -1389,7 +1388,6 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
   {
     AttributeList AL;
     AL = AL.addFnAttribute(M.getContext(),Attribute::NoUnwind);
-    AL = AL.addFnAttribute(M.getContext(),Attribute::ReadOnly);
     AL = AL.addRetAttribute(M.getContext(), Attribute::ZExt);
     DFSanReadLabelFn =
         Mod->getOrInsertFunction("__dfsan_read_label", DFSanReadLabelFnTy, AL);
@@ -2293,7 +2291,7 @@ std::pair<Value *, Value *> DFSanFunction::loadShadowOriginSansLoadTracking(
             ShouldTrackOrigins ? DFS.ZeroOrigin : nullptr};
 
   if(KDFSAN){
-    IRBuilder<> IRB(Pos->getParent());
+    IRBuilder<> IRB(Pos->getParent(),Pos);
     CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanReadLabelFn,
         {IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
         ConstantInt::get(DFS.IntptrTy, Size)});
