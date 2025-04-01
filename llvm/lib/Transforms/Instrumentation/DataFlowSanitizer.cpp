@@ -2297,7 +2297,7 @@ std::pair<Value *, Value *> DFSanFunction::loadShadowOriginSansLoadTracking(
     CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanReadLabelFn,
         {IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
         ConstantInt::get(DFS.IntptrTy, Size)});
-    FallbackCall->addParamAttr(AttributeList::ReturnIndex, Attribute::ZExt);
+    FallbackCall->addRetAttr(Attribute::ZExt);
     return {FallbackCall,
             ShouldTrackOrigins ? DFS.ZeroOrigin : nullptr};;
   }
@@ -2632,6 +2632,7 @@ void DFSanFunction::storePrimitiveShadowOrigin(Value *Addr, uint64_t Size,
     CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanSetLabelFn,
         {PrimitiveShadow,IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
         ConstantInt::get(DFS.IntptrTy, Size)});
+    FallbackCall->addRetAttr(Attribute::ZExt);
     return;
   }
 
