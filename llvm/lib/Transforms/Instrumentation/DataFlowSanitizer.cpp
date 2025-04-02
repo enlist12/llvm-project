@@ -192,8 +192,23 @@ static cl::opt<bool> ClDebugNonzeroLabels(
 //   void __dfsan_store_callback(dfsan_label Label, void* addr);
 //   void __dfsan_mem_transfer_callback(void *dest, const void *src, uptr size);
 //   void __dfsan_cmp_callback(dfsan_label CombinedLabel);
-static cl::opt<bool> ClEventCallbacks(
-    "dfsan-event-callbacks",
+static cl::opt<bool> ClEventMemTransCallbacks(
+    "dfsan-event-mem-transfer-callbacks",
+    cl::desc("Insert calls to __dfsan_*_callback functions on data events."),
+    cl::Hidden, cl::init(false));
+
+static cl::opt<bool> ClEventLoadCallbacks(
+    "dfsan-event-load-callbacks",
+    cl::desc("Insert calls to __dfsan_*_callback functions on data events."),
+    cl::Hidden, cl::init(false));
+
+static cl::opt<bool> ClEventStoreCallbacks(
+    "dfsan-event-store-callbacks",
+    cl::desc("Insert calls to __dfsan_*_callback functions on data events."),
+    cl::Hidden, cl::init(false));
+
+static cl::opt<bool> ClEventCmpCallbacks(
+    "dfsan-event-cmp-callbacks",
     cl::desc("Insert calls to __dfsan_*_callback functions on data events."),
     cl::Hidden, cl::init(false));
 
@@ -425,7 +440,9 @@ class DataFlowSanitizer {
     /// original function or provide its own implementation. WK_Custom uses an
     /// extra pointer argument to return the shadow.  This allows the wrapped
     /// form of the function type to be expressed in C.
-    WK_Custom
+    WK_Custom,
+
+    WK_Formal // This function is present in an uninstrumented form.
   };
 
   Module *Mod;
@@ -1249,7 +1266,7 @@ DataFlowSanitizer::WrapperKind DataFlowSanitizer::getWrapperKind(Function *F) {
   if (ABIList.isIn(*F, "custom"))
     return WK_Custom;
 
-  return WK_Warning;
+  return WK_Formal;
 }
 
 void DataFlowSanitizer::addGlobalNameSuffix(GlobalValue *GV) {
@@ -2471,7 +2488,7 @@ void DFSanVisitor::visitLoadInst(LoadInst &LI) {
     DFSF.setOrigin(&LI, DFSF.combineOrigins(Shadows, Origins, Pos));
   }
 
-  if (ClEventCallbacks) {
+  if (ClEventLoadCallbacks) {
     IRBuilder<> IRB(Pos->getParent(), Pos);
     Value *Addr = LI.getPointerOperand();
     CallInst *CI =
@@ -2746,7 +2763,7 @@ void DFSanVisitor::visitStoreInst(StoreInst &SI) {
     Origin = DFSF.combineOrigins(Shadows, Origins, SI.getIterator());
   DFSF.storePrimitiveShadowOrigin(SI.getPointerOperand(), Size, SI.getAlign(),
                                   PrimitiveShadow, Origin, SI.getIterator());
-  if (ClEventCallbacks) {
+  if (ClEventStoreCallbacks) {
     IRBuilder<> IRB(&SI);
     Value *Addr = SI.getPointerOperand();
     CallInst *CI =
@@ -2810,7 +2827,7 @@ void DFSanVisitor::visitCastInst(CastInst &CI) { visitInstOperands(CI); }
 
 void DFSanVisitor::visitCmpInst(CmpInst &CI) {
   visitInstOperands(CI);
-  if (ClEventCallbacks) {
+  if (ClEventCmpCallbacks) {
     IRBuilder<> IRB(&CI);
     Value *CombinedShadow = DFSF.getShadow(&CI);
     CallInst *CallI =
@@ -2977,7 +2994,7 @@ void DFSanVisitor::visitMemTransferInst(MemTransferInst &I) {
   IRBuilder<> IRB(&I);
 
   // KDFsan memtransfer is achieved by callback
-  if (ClEventCallbacks) {
+  if (ClEventMemTransCallbacks) {
     Value *Dest = IRB.CreateBitCast(I.getDest(), Int8Ptr);
     Value *Src = IRB.CreateBitCast(I.getSource(), Int8Ptr);
     Value *Size = IRB.CreateZExtOrTrunc(I.getLength(), DFSF.DFS.IntptrTy);
@@ -3115,6 +3132,12 @@ bool DFSanVisitor::visitWrappedCallBase(Function &F, CallBase &CB) {
     CB.setCalledFunction(&F);
     IRB.CreateCall(DFSF.DFS.DFSanUnimplementedFn,
                    IRB.CreateGlobalString(F.getName()));
+    DFSF.DFS.buildExternWeakCheckIfNeeded(IRB, &F);
+    DFSF.setShadow(&CB, DFSF.DFS.getZeroShadow(&CB));
+    DFSF.setOrigin(&CB, DFSF.DFS.ZeroOrigin);
+    return true;
+  case DataFlowSanitizer::WK_Formal:
+    CB.setCalledFunction(&F);
     DFSF.DFS.buildExternWeakCheckIfNeeded(IRB, &F);
     DFSF.setShadow(&CB, DFSF.DFS.getZeroShadow(&CB));
     DFSF.setOrigin(&CB, DFSF.DFS.ZeroOrigin);
@@ -3531,6 +3554,7 @@ PreservedAnalyses DataFlowSanitizerPass::run(Module &M,
   return PA;
 }
 
+/*
 PassPluginLibraryInfo getPassPluginInfo() {
   const auto callback = [](PassBuilder &PB) {
       PB.registerPipelineEarlySimplificationEPCallback([&](ModulePassManager &MPM,OptimizationLevel OL, ThinOrFullLTOPhase) {
@@ -3544,5 +3568,9 @@ PassPluginLibraryInfo getPassPluginInfo() {
 
 extern "C" LLVM_ATTRIBUTE_WEAK PassPluginLibraryInfo llvmGetPassPluginInfo() {
   return getPassPluginInfo();
+  
 }
+*/
+
+
 

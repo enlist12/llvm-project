@@ -13,7 +13,7 @@ fun:dfsan_set_label=discard
 fun:dfsan_add_label=uninstrumented
 fun:dfsan_add_label=discard
 fun:dfsan_get_label=uninstrumented
-fun:dfsan_get_label=discard
+fun:dfsan_get_label=custom
 fun:dfsan_read_label=uninstrumented
 fun:dfsan_read_label=discard
 fun:dfsan_get_label_count=uninstrumented
@@ -25,7 +25,7 @@ fun:dfsan_has_label=discard
 fun:dfsan_has_label_with_desc=uninstrumented
 fun:dfsan_has_label_with_desc=discard
 fun:dfsan_set_write_callback=uninstrumented
-fun:dfsan_set_write_callback=discard
+fun:dfsan_set_write_callback=custom
 fun:dfsan_flush=uninstrumented
 fun:dfsan_flush=discard
 fun:dfsan_print_origin_trace=uninstrumented
@@ -39,7 +39,7 @@ fun:dfsan_sprint_origin_id_trace=discard
 fun:dfsan_sprint_stack_trace=uninstrumented
 fun:dfsan_sprint_stack_trace=discard
 fun:dfsan_get_origin=uninstrumented
-fun:dfsan_get_origin=discard
+fun:dfsan_get_origin=custom
 fun:dfsan_read_origin_of_first_taint=uninstrumented
 fun:dfsan_read_origin_of_first_taint=discard
 fun:dfsan_get_init_origin=uninstrumented
@@ -227,90 +227,103 @@ fun:vfprintf=discard
 
 # Functions that produce output does not depend on the input (need to zero the
 # shadow manually).
-fun:_dl_get_tls_static_info=discard
-fun:clock_gettime=discard
-fun:dlopen=discard
-fun:epoll_wait=discard
-fun:fgets=discard
-fun:fstat=discard
-fun:getcwd=discard
-fun:get_current_dir_name=discard
-fun:getentropy=discard
-fun:gethostname=discard
-fun:getpeername=discard
-fun:getrlimit=discard
-fun:getrusage=discard
-fun:getsockname=discard
-fun:getsockopt=discard
-fun:nanosleep=discard
-fun:pread=discard
-fun:read=discard
-fun:recvmmsg=discard
-fun:recvmsg=discard
-fun:sigaltstack=discard
-fun:socketpair=discard
-fun:stat=discard
-fun:time=discard
+fun:_dl_get_tls_static_info=custom
+fun:clock_gettime=custom
+fun:dlopen=custom
+fun:epoll_wait=custom
+fun:fgets=custom
+fun:fstat=custom
+fun:getcwd=custom
+fun:get_current_dir_name=custom
+fun:getentropy=custom
+fun:gethostname=custom
+fun:getpeername=custom
+fun:getrlimit=custom
+fun:getrusage=custom
+fun:getsockname=custom
+fun:getsockopt=custom
+fun:nanosleep=custom
+fun:pread=custom
+fun:read=custom
+fun:recvmmsg=custom
+fun:recvmsg=custom
+fun:sigaltstack=custom
+fun:socketpair=custom
+fun:stat=custom
+fun:time=custom
 
 # Functions that produce an output that depend on the input (propagate the
 # shadow manually).
-fun:ctime_r=discard
-fun:inet_pton=discard
-fun:localtime_r=discard
-fun:memcpy=discard
-fun:memmove=discard
-fun:memset=discard
-fun:strcpy=discard
-fun:strdup=discard
-fun:strncpy=discard
-fun:strtod=discard
-fun:strtol=discard
-fun:strtoll=discard
-fun:strtoul=discard
-fun:strtoull=discard
-fun:strcat=discard
-fun:strncat=discard
-fun:__isoc23_strtod=discard
-fun:__isoc23_strtol=discard
-fun:__isoc23_strtoll=discard
-fun:__isoc23_strtoul=discard
-fun:__isoc23_strtoull=discard
-fun:__memcpy_mcsafe=uninstrumented
-fun:__memcpy_mcsafe=discard 
+fun:ctime_r=custom
+fun:inet_pton=custom
+fun:localtime_r=custom
+fun:memcpy=custom
+fun:memmove=custom
+fun:memset=custom
+fun:strcpy=custom
+fun:strdup=custom
+fun:strncpy=custom
+fun:strtod=custom
+fun:strtol=custom
+fun:strtoll=custom
+fun:strtoul=custom
+fun:strtoull=custom
+fun:strcat=custom
+fun:strncat=custom
+fun:__isoc23_strtod=custom
+fun:__isoc23_strtol=custom
+fun:__isoc23_strtoll=custom
+fun:__isoc23_strtoul=custom
+fun:__isoc23_strtoull=custom
 
-
+# Functions that produce an output that is computed from the input, but is not
+# necessarily data dependent.
+fun:bcmp=custom
+fun:memchr=custom
+fun:memcmp=custom
+fun:strcasecmp=custom
+fun:strchr=custom
+fun:strcmp=custom
+fun:strlen=custom
+fun:strnlen=custom
+fun:strncasecmp=custom
+fun:strncmp=custom
+fun:strpbrk=custom
+fun:strrchr=custom
+fun:strstr=custom
+fun:strsep=custom
 
 # Functions which take action based on global state, such as running a callback
 # set by a separate function.
-fun:write=discard
+fun:write=custom
 
 # Functions that take a callback (wrap the callback manually).
-fun:dl_iterate_phdr=discard
+fun:dl_iterate_phdr=custom
 
-fun:getpwuid_r=discard
-fun:poll=discard
-fun:sched_getaffinity=discard
-fun:select=discard
-fun:sigemptyset=discard
-fun:sigaction=discard
-fun:signal=discard
-fun:gettimeofday=discard
+fun:getpwuid_r=custom
+fun:poll=custom
+fun:sched_getaffinity=custom
+fun:select=custom
+fun:sigemptyset=custom
+fun:sigaction=custom
+fun:signal=custom
+fun:gettimeofday=custom
 
 # sprintf-like
-fun:sprintf=discard
-fun:snprintf=discard
+fun:sprintf=custom
+fun:snprintf=custom
 
 # scanf-like
-fun:sscanf=discard
-fun:__isoc99_sscanf=discard
-fun:__isoc23_sscanf=discard
+fun:sscanf=custom
+fun:__isoc99_sscanf=custom
+fun:__isoc23_sscanf=custom
 
-# TODO: discard
+# TODO: custom
 fun:asprintf=discard
 fun:qsort=discard
 
 # fork
-fun:fork=discard
+fun:fork=custom
 
 ###############################################################################
 # pthread
@@ -368,11 +381,11 @@ fun:pthread_self=discard
 fun:pthread_setspecific=discard
 
 # Functions that take a callback (wrap the callback manually).
-fun:pthread_create=discard
+fun:pthread_create=custom
 
 # Functions that produce output does not depend on the input (need to zero the
 # shadow manually).
-fun:pthread_join=discard
+fun:pthread_join=custom
 
 ###############################################################################
 # libffi/libgo
@@ -400,24 +413,24 @@ fun:reflect.makeFuncStub=discard
 # lib/Fuzzer
 ###############################################################################
 # Replaces __sanitizer_cov_trace_cmp with __dfsw___sanitizer_cov_trace_cmp
-fun:__sanitizer_cov_trace_cmp1=discard
+fun:__sanitizer_cov_trace_cmp1=custom
 fun:__sanitizer_cov_trace_cmp1=uninstrumented
-fun:__sanitizer_cov_trace_cmp2=discard
+fun:__sanitizer_cov_trace_cmp2=custom
 fun:__sanitizer_cov_trace_cmp2=uninstrumented
-fun:__sanitizer_cov_trace_cmp4=discard
+fun:__sanitizer_cov_trace_cmp4=custom
 fun:__sanitizer_cov_trace_cmp4=uninstrumented
-fun:__sanitizer_cov_trace_cmp8=discard
+fun:__sanitizer_cov_trace_cmp8=custom
 fun:__sanitizer_cov_trace_cmp8=uninstrumented
-fun:__sanitizer_cov_trace_const_cmp1=discard
+fun:__sanitizer_cov_trace_const_cmp1=custom
 fun:__sanitizer_cov_trace_const_cmp1=uninstrumented
-fun:__sanitizer_cov_trace_const_cmp2=discard
+fun:__sanitizer_cov_trace_const_cmp2=custom
 fun:__sanitizer_cov_trace_const_cmp2=uninstrumented
-fun:__sanitizer_cov_trace_const_cmp4=discard
+fun:__sanitizer_cov_trace_const_cmp4=custom
 fun:__sanitizer_cov_trace_const_cmp4=uninstrumented
-fun:__sanitizer_cov_trace_const_cmp8=discard
+fun:__sanitizer_cov_trace_const_cmp8=custom
 fun:__sanitizer_cov_trace_const_cmp8=uninstrumented
 # Similar for __sanitizer_cov_trace_switch
-fun:__sanitizer_cov_trace_switch=discard
+fun:__sanitizer_cov_trace_switch=custom
 fun:__sanitizer_cov_trace_switch=uninstrumented
 
 # Ignores all other __sanitizer callbacks.
