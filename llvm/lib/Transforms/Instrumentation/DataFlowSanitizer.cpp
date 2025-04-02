@@ -39,6 +39,9 @@
 #include "llvm/Transforms/Instrumentation/DataFlowSanitizer.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/Passes/PassPlugin.h"
+#include "llvm/Passes/PassBuilder.h"
 #include "llvm/ADT/DepthFirstIterator.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -2630,7 +2633,6 @@ void DFSanFunction::storePrimitiveShadowOrigin(Value *Addr, uint64_t Size,
     CallInst *FallbackCall = IRB.CreateCall(DFS.DFSanSetLabelFn,
         {PrimitiveShadow,IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFS.Ctx) ),
         ConstantInt::get(DFS.IntptrTy, Size)});
-    FallbackCall->addRetAttr(Attribute::ZExt);
     return;
   }
 
@@ -3527,5 +3529,20 @@ PreservedAnalyses DataFlowSanitizerPass::run(Module &M,
   // make changes that require GlobalsAA to be invalidated.
   PA.abandon<GlobalsAA>();
   return PA;
+}
+
+PassPluginLibraryInfo getPassPluginInfo() {
+  const auto callback = [](PassBuilder &PB) {
+      PB.registerPipelineEarlySimplificationEPCallback([&](ModulePassManager &MPM,OptimizationLevel OL, ThinOrFullLTOPhase) {
+          MPM.addPass(DataFlowSanitizerPass());
+          return true;
+      });
+  };
+
+  return {LLVM_PLUGIN_API_VERSION, "DataFlowSanitizerPass", "0.0.1", callback};
+};
+
+extern "C" LLVM_ATTRIBUTE_WEAK PassPluginLibraryInfo llvmGetPassPluginInfo() {
+  return getPassPluginInfo();
 }
 
