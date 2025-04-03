@@ -1611,7 +1611,7 @@ bool DataFlowSanitizer::runImpl(
 
     bool GAInst = isInstrumented(&GA), FInst = isInstrumented(F);
     if (GAInst && FInst) {
-      addGlobalNameSuffix(&GA);
+      //addGlobalNameSuffix(&GA);
     } else if (GAInst != FInst) {
       // Non-instrumented alias of an instrumented function, or vice versa.
       // Replace the alias with a native-ABI wrapper of the aliasee.  The pass
@@ -1646,7 +1646,7 @@ bool DataFlowSanitizer::runImpl(
       // Instrumented functions get a '.dfsan' suffix.  This allows us to more
       // easily identify cases of mismatching ABIs. This naming scheme is
       // mangling-compatible (see Itanium ABI), using a vendor-specific suffix.
-      addGlobalNameSuffix(&F);
+      //addGlobalNameSuffix(&F);
     } else if (!IsZeroArgsVoidRet || getWrapperKind(&F) == WK_Custom) {
       // Build a wrapper function for F.  The wrapper simply calls F, and is
       // added to FnsToInstrument so that any instrumentation according to its
