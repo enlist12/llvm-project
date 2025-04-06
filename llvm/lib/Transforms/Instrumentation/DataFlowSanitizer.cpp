@@ -478,6 +478,8 @@ class DataFlowSanitizer {
   FunctionType *DFSanReadLabelFnTy;
   FunctionType *DFSanWrapStoreFnTy;
   FunctionType *DFSanWrapCallFnTy;
+  FunctionType *DFSanWrapKfreeFnTy;
+  FunctionType *DFSanWrapKmemFnTy;
   FunctionType *DFSanChainOriginFnTy;
   FunctionType *DFSanChainOriginIfTaintedFnTy;
   FunctionType *DFSanMemOriginTransferFnTy;
@@ -491,6 +493,8 @@ class DataFlowSanitizer {
   FunctionCallee DFSanSetLabelFn;
   FunctionCallee DFSanWrapStoreFn;
   FunctionCallee DFSanWrapCallFn;
+  FunctionCallee DFSanWrapKfreeFn;
+  FunctionCallee DFSanWrapKmemFn;
   FunctionCallee DFSanNonzeroLabelFn;
   FunctionCallee DFSanVarargWrapperFn;
   FunctionCallee DFSanLoadCallbackFn;
@@ -1241,6 +1245,12 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   Type *DFSanWrapCallArgs = { PrimitiveShadowTy };
   DFSanWrapCallFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapCallArgs, /*isVarArg=*/ false);
+  Type *DFSanWrapKfreeArgs = { PrimitiveShadowTy };
+  DFSanWrapKfreeFnTy = 
+        FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapKfreeArgs, /*isVarArg=*/ false);
+  Type *DFSanWrapKmemArgs = { PrimitiveShadowTy };
+  DFSanWrapKmemFnTy = 
+        FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapKmemArgs, /*isVarArg=*/ false);
   ColdCallWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   OriginStoreWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   return true;
@@ -1375,6 +1385,20 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
     DFSanWrapCallFn = Mod->getOrInsertFunction(
         "__dfsan_taint_wrapper_call", DFSanWrapStoreFnTy, AL);
+  }
+  {
+    AttributeList AL;
+    AL = AL.addFnAttribute(C, Attribute::NoUnwind);
+    AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
+    DFSanWrapKfreeFn = Mod->getOrInsertFunction(
+        "__dfsan_taint_wrapper_kfree", DFSanWrapKfreeFnTy, AL);
+  }
+  {
+    AttributeList AL;
+    AL = AL.addFnAttribute(C, Attribute::NoUnwind);
+    AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
+    DFSanWrapKmemFn = Mod->getOrInsertFunction(
+        "__dfsan_taint_wrapper_kmem", DFSanWrapKmemFnTy, AL);
   }
   DFSanUnimplementedFn =
       Mod->getOrInsertFunction("__dfsan_unimplemented", DFSanUnimplementedFnTy);
@@ -2317,7 +2341,7 @@ std::pair<Value *, Value *> DFSanFunction::loadShadowOriginSansLoadTracking(
         ConstantInt::get(DFS.IntptrTy, Size)});
     FallbackCall->addRetAttr(Attribute::ZExt);
     return {FallbackCall,
-            ShouldTrackOrigins ? DFS.ZeroOrigin : nullptr};;
+            ShouldTrackOrigins ? DFS.ZeroOrigin : nullptr};
   }
   // Use callback to load if this is not an optimizable case for origin
   // tracking.
@@ -3375,6 +3399,22 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
   if (CB.isInlineAsm()){
     DFSF.setShadow(&CB, DFSF.DFS.getZeroShadow(&CB));
     return;
+  }
+  if(F&&F->hasName()){
+    if(F->getName()=="kfree"){
+      Module *M=CB.getModule();
+      Value* Shadow=
+          DFSF.getShadow(CB.getArgOperand(0));
+      IRBuilder<> IRB(&CB);
+      IRB.CreateCall(DFSF.DFS.DFSanWrapKfreeFn, {Shadow});
+    }
+    else if(F->getName()=="kmem_cache_free"){
+      Module *M=CB.getModule();
+      Value* Shadow=
+          DFSF.getShadow(CB.getArgOperand(1));
+      IRBuilder<> IRB(&CB);
+      IRB.CreateCall(DFSF.DFS.DFSanWrapKmemFn, {Shadow});
+    }
   }
   if(CB.isIndirectCall()){
     Module *M=CB.getModule();
