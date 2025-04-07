@@ -3394,6 +3394,7 @@ void DFSanVisitor::visitLibAtomicCompareExchange(CallBase &CB) {
                       NextIRB.CreateIntCast(Size, DFSF.DFS.IntptrTy, false)});
 }
 
+
 void DFSanVisitor::visitCallBase(CallBase &CB) {
   Function *F = CB.getCalledFunction();
   if (CB.isInlineAsm()){
@@ -3401,7 +3402,8 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
     return;
   }
   if(F&&F->hasName()){
-    if(F->getName()=="kfree"){
+
+    if(F->getName()=="kfree" || F->getName()=="kvfree"){
       Module *M=CB.getModule();
       Value* Shadow=
           DFSF.getShadow(CB.getArgOperand(0));
