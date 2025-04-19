@@ -220,6 +220,11 @@ static cl::opt<bool> ClConditionalCallbacks(
     cl::desc("Insert calls to callback functions on conditionals."), cl::Hidden,
     cl::init(false));
 
+static cl::opt<bool> ClCmpDetect(
+    "dfsan-cmp-detect",
+    cl::desc("Detect cmp taint"), cl::Hidden,
+    cl::init(false));
+
 // Experimental feature that inserts callbacks for data reaching a function,
 // either via function arguments and loads.
 // This must be true for dfsan_set_reaches_function_callback() to have effect.
@@ -480,6 +485,7 @@ class DataFlowSanitizer {
   FunctionType *DFSanWrapCallFnTy;
   FunctionType *DFSanWrapKfreeFnTy;
   FunctionType *DFSanWrapKmemFnTy;
+  FunctionType *DFSanCmpDetectFnTy;
   FunctionType *DFSanChainOriginFnTy;
   FunctionType *DFSanChainOriginIfTaintedFnTy;
   FunctionType *DFSanMemOriginTransferFnTy;
@@ -499,6 +505,7 @@ class DataFlowSanitizer {
   FunctionCallee DFSanVarargWrapperFn;
   FunctionCallee DFSanLoadCallbackFn;
   FunctionCallee DFSanStoreCallbackFn;
+  FunctionCallee DFSanCmpDetectFn;
   FunctionCallee DFSanMemTransferCallbackFn;
   FunctionCallee DFSanConditionalCallbackFn;
   FunctionCallee DFSanConditionalCallbackOriginFn;
@@ -1251,6 +1258,10 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   Type *DFSanWrapKmemArgs = { PrimitiveShadowTy };
   DFSanWrapKmemFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapKmemArgs, /*isVarArg=*/ false);
+  Type *DFSanCmpDetectArgs[6] = { PrimitiveShadowTy, PrimitiveShadowTy,
+                                 Type::getInt64Ty(*Ctx),Type::getInt64Ty(*Ctx) , Type::getInt8Ty(*Ctx),Type::getInt64Ty(*Ctx) };
+  DFSanCmpDetectFnTy = FunctionType::get(
+      Type::getInt1Ty(*Ctx), DFSanCmpDetectArgs, /*isVarArg=*/false);
   ColdCallWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   OriginStoreWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   return true;
@@ -1399,6 +1410,18 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
     DFSanWrapKmemFn = Mod->getOrInsertFunction(
         "__dfsan_taint_wrapper_kmem", DFSanWrapKmemFnTy, AL);
+  }
+  {
+    AttributeList AL;
+    AL = AL.addFnAttribute(C, Attribute::NoUnwind);
+    AL = AL.addParamAttribute(C, 0, Attribute::ZExt);
+    AL = AL.addParamAttribute(C, 1, Attribute::ZExt);
+    AL = AL.addParamAttribute(C, 2, Attribute::ZExt);
+    AL = AL.addParamAttribute(C, 3, Attribute::ZExt);
+    AL = AL.addParamAttribute(C, 3, Attribute::ZExt);
+    AL = AL.addRetAttribute(C, Attribute::ZExt);
+    DFSanCmpDetectFn =
+        Mod->getOrInsertFunction("__dfsan_cmp_detect", DFSanCmpDetectFnTy, AL);
   }
   DFSanUnimplementedFn =
       Mod->getOrInsertFunction("__dfsan_unimplemented", DFSanUnimplementedFnTy);
@@ -2851,6 +2874,25 @@ void DFSanVisitor::visitCastInst(CastInst &CI) { visitInstOperands(CI); }
 
 void DFSanVisitor::visitCmpInst(CmpInst &CI) {
   visitInstOperands(CI);
+  if(ClCmpDetect){
+    if(isa<ICmpInst>(&CI)){
+      LLVMContext *Ctx=DFSF.DFS.Ctx;
+      ICmpInst* ICI=dyn_cast<ICmpInst>(&CI);
+      Value* op1=ICI->getOperand(0);
+      Value* op2=ICI->getOperand(1);
+      ICmpInst::Predicate pred=ICI->getPredicate();
+      uint64_t inst_addr=reinterpret_cast<uint64_t>(ICI);
+      uint8_t PredCode = static_cast<uint8_t>(pred);
+      Value* pred_code=ConstantInt::get(Type::getInt8Ty(*Ctx),PredCode);
+      Value* inst_raw_addr=ConstantInt::get(Type::getInt64Ty(*Ctx),inst_addr);
+      Value* PrimitiveShadow=DFSF.getShadow(op1);
+      Value* PrimitiveShadow2=DFSF.getShadow(op2);
+      CallInst* Fcall=CallInst::Create(DFSF.DFS.DFSanCmpDetectFn,
+          {PrimitiveShadow,PrimitiveShadow2,op1,op2,pred_code,inst_raw_addr});
+      Fcall->addRetAttr(Attribute::ZExt);
+      ICI->replaceAllUsesWith(Fcall);
+    }
+  }
   if (ClEventCmpCallbacks) {
     IRBuilder<> IRB(&CI);
     Value *CombinedShadow = DFSF.getShadow(&CI);
