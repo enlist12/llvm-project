@@ -1418,7 +1418,8 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     AL = AL.addParamAttribute(C, 1, Attribute::ZExt);
     AL = AL.addParamAttribute(C, 2, Attribute::ZExt);
     AL = AL.addParamAttribute(C, 3, Attribute::ZExt);
-    AL = AL.addParamAttribute(C, 3, Attribute::ZExt);
+    AL = AL.addParamAttribute(C, 4, Attribute::ZExt);
+    AL = AL.addParamAttribute(C, 5, Attribute::ZExt);
     AL = AL.addRetAttribute(C, Attribute::ZExt);
     DFSanCmpDetectFn =
         Mod->getOrInsertFunction("__dfsan_cmp_detect", DFSanCmpDetectFnTy, AL);
@@ -2878,8 +2879,11 @@ void DFSanVisitor::visitCmpInst(CmpInst &CI) {
     if(isa<ICmpInst>(&CI)){
       LLVMContext *Ctx=DFSF.DFS.Ctx;
       ICmpInst* ICI=dyn_cast<ICmpInst>(&CI);
+      IRBuilder<> Builder(ICI);
       Value* op1=ICI->getOperand(0);
       Value* op2=ICI->getOperand(1);
+      Value *Op1Cast = Builder.CreateZExtOrTrunc(op1, Type::getInt64Ty(*Ctx));
+      Value *Op2Cast = Builder.CreateZExtOrTrunc(op2, Type::getInt64Ty(*Ctx));
       ICmpInst::Predicate pred=ICI->getPredicate();
       uint64_t inst_addr=reinterpret_cast<uint64_t>(ICI);
       uint8_t PredCode = static_cast<uint8_t>(pred);
@@ -2888,9 +2892,10 @@ void DFSanVisitor::visitCmpInst(CmpInst &CI) {
       Value* PrimitiveShadow=DFSF.getShadow(op1);
       Value* PrimitiveShadow2=DFSF.getShadow(op2);
       CallInst* Fcall=CallInst::Create(DFSF.DFS.DFSanCmpDetectFn,
-          {PrimitiveShadow,PrimitiveShadow2,op1,op2,pred_code,inst_raw_addr});
+          {PrimitiveShadow,PrimitiveShadow2,Op1Cast,Op2Cast,pred_code,inst_raw_addr},"cmp_shadow",ICI);
       Fcall->addRetAttr(Attribute::ZExt);
       ICI->replaceAllUsesWith(Fcall);
+      ICI->eraseFromParent();
     }
   }
   if (ClEventCmpCallbacks) {
