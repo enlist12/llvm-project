@@ -2882,8 +2882,16 @@ void DFSanVisitor::visitCmpInst(CmpInst &CI) {
       IRBuilder<> Builder(ICI);
       Value* op1=ICI->getOperand(0);
       Value* op2=ICI->getOperand(1);
-      Value *Op1Cast = Builder.CreateZExtOrTrunc(op1, Type::getInt64Ty(*Ctx));
-      Value *Op2Cast = Builder.CreateZExtOrTrunc(op2, Type::getInt64Ty(*Ctx));
+      Value *Op1Cast=NULL;
+      Value *Op2Cast=NULL;
+      if(op1->getType()->isPointerTy()){
+        Op1Cast = Builder.CreatePtrToInt(op1, Type::getInt64Ty(*Ctx));
+        Op2Cast = Builder.CreatePtrToInt(op2, Type::getInt64Ty(*Ctx));
+      }
+      else{
+        Op1Cast = Builder.CreateZExtOrTrunc(op1, Type::getInt64Ty(*Ctx));
+        Op2Cast = Builder.CreateZExtOrTrunc(op2, Type::getInt64Ty(*Ctx));
+      }
       ICmpInst::Predicate pred=ICI->getPredicate();
       uint64_t inst_addr=reinterpret_cast<uint64_t>(ICI);
       uint8_t PredCode = static_cast<uint8_t>(pred);
