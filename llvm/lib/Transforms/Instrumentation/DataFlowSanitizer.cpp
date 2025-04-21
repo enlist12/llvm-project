@@ -1258,8 +1258,8 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   Type *DFSanWrapKmemArgs = { PrimitiveShadowTy };
   DFSanWrapKmemFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapKmemArgs, /*isVarArg=*/ false);
-  Type *DFSanCmpDetectArgs[6] = { PrimitiveShadowTy, PrimitiveShadowTy,
-                                 Type::getInt64Ty(*Ctx),Type::getInt64Ty(*Ctx) , Type::getInt8Ty(*Ctx),Type::getInt64Ty(*Ctx) };
+  Type *DFSanCmpDetectArgs[4] = { PrimitiveShadowTy, PrimitiveShadowTy,
+                                 Type::getInt1Ty(*Ctx),Type::getInt64Ty(*Ctx) };
   DFSanCmpDetectFnTy = FunctionType::get(
       Type::getInt1Ty(*Ctx), DFSanCmpDetectArgs, /*isVarArg=*/false);
   ColdCallWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
@@ -1418,8 +1418,6 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     AL = AL.addParamAttribute(C, 1, Attribute::ZExt);
     AL = AL.addParamAttribute(C, 2, Attribute::ZExt);
     AL = AL.addParamAttribute(C, 3, Attribute::ZExt);
-    AL = AL.addParamAttribute(C, 4, Attribute::ZExt);
-    AL = AL.addParamAttribute(C, 5, Attribute::ZExt);
     AL = AL.addRetAttribute(C, Attribute::ZExt);
     DFSanCmpDetectFn =
         Mod->getOrInsertFunction("__dfsan_cmp_detect", DFSanCmpDetectFnTy, AL);
@@ -2879,31 +2877,23 @@ void DFSanVisitor::visitCmpInst(CmpInst &CI) {
     if(isa<ICmpInst>(&CI)){
       LLVMContext *Ctx=DFSF.DFS.Ctx;
       ICmpInst* ICI=dyn_cast<ICmpInst>(&CI);
-      IRBuilder<> Builder(ICI);
+      IRBuilder<> Builder(ICI->getNextNode());
       Value* op1=ICI->getOperand(0);
       Value* op2=ICI->getOperand(1);
-      Value *Op1Cast=NULL;
-      Value *Op2Cast=NULL;
-      if(op1->getType()->isPointerTy()){
-        Op1Cast = Builder.CreatePtrToInt(op1, Type::getInt64Ty(*Ctx));
-        Op2Cast = Builder.CreatePtrToInt(op2, Type::getInt64Ty(*Ctx));
-      }
-      else{
-        Op1Cast = Builder.CreateZExtOrTrunc(op1, Type::getInt64Ty(*Ctx));
-        Op2Cast = Builder.CreateZExtOrTrunc(op2, Type::getInt64Ty(*Ctx));
-      }
-      ICmpInst::Predicate pred=ICI->getPredicate();
+      Value* result=ICI;
       uint64_t inst_addr=reinterpret_cast<uint64_t>(ICI);
-      uint8_t PredCode = static_cast<uint8_t>(pred);
-      Value* pred_code=ConstantInt::get(Type::getInt8Ty(*Ctx),PredCode);
       Value* inst_raw_addr=ConstantInt::get(Type::getInt64Ty(*Ctx),inst_addr);
       Value* PrimitiveShadow=DFSF.getShadow(op1);
       Value* PrimitiveShadow2=DFSF.getShadow(op2);
-      CallInst* Fcall=CallInst::Create(DFSF.DFS.DFSanCmpDetectFn,
-          {PrimitiveShadow,PrimitiveShadow2,Op1Cast,Op2Cast,pred_code,inst_raw_addr},"cmp_shadow",ICI);
-      Fcall->addRetAttr(Attribute::ZExt);
-      ICI->replaceAllUsesWith(Fcall);
-      ICI->eraseFromParent();
+      CallInst* Fcall=Builder.CreateCall(DFSF.DFS.DFSanCmpDetectFn,
+          {PrimitiveShadow,PrimitiveShadow2,result,inst_raw_addr},"cmp_shadow");
+      ICI->replaceUsesWithIf(Fcall,
+          [&](Use &U) { 
+            if(BranchInst* BI=dyn_cast<BranchInst>(U.getUser())){
+              return true;
+            }
+            return false;
+           });
     }
   }
   if (ClEventCmpCallbacks) {
