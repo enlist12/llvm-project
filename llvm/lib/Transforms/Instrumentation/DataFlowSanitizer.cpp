@@ -1252,10 +1252,10 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   Type *DFSanWrapCallArgs = { PrimitiveShadowTy };
   DFSanWrapCallFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapCallArgs, /*isVarArg=*/ false);
-  Type *DFSanWrapKfreeArgs = { PrimitiveShadowTy };
+  Type *DFSanWrapKfreeArgs[2] = { PrimitiveShadowTy,Int8Ptr };
   DFSanWrapKfreeFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapKfreeArgs, /*isVarArg=*/ false);
-  Type *DFSanWrapKmemArgs = { PrimitiveShadowTy };
+  Type *DFSanWrapKmemArgs[2] = { PrimitiveShadowTy,Int8Ptr };
   DFSanWrapKmemFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapKmemArgs, /*isVarArg=*/ false);
   Type *DFSanCmpDetectArgs[3] = { PrimitiveShadowTy, PrimitiveShadowTy,
@@ -3447,17 +3447,19 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
 
     if(F->getName()=="kfree" || F->getName()=="kvfree"){
       Module *M=CB.getModule();
+      Value* Addr=CB.getArgOperand(0);
       Value* Shadow=
-          DFSF.getShadow(CB.getArgOperand(0));
+          DFSF.getShadow(Addr);
       IRBuilder<> IRB(&CB);
-      IRB.CreateCall(DFSF.DFS.DFSanWrapKfreeFn, {Shadow});
+      IRB.CreateCall(DFSF.DFS.DFSanWrapKfreeFn, {Shadow,IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFSF.DFS.Ctx) )});
     }
     else if(F->getName()=="kmem_cache_free"){
       Module *M=CB.getModule();
+      Value* Addr=CB.getArgOperand(1);
       Value* Shadow=
-          DFSF.getShadow(CB.getArgOperand(1));
+          DFSF.getShadow(Addr);
       IRBuilder<> IRB(&CB);
-      IRB.CreateCall(DFSF.DFS.DFSanWrapKmemFn, {Shadow});
+      IRB.CreateCall(DFSF.DFS.DFSanWrapKmemFn, {Shadow,IRB.CreateBitCast(Addr,PointerType::getUnqual(*DFSF.DFS.Ctx) )});
     }
   }
   if(CB.isIndirectCall()){
