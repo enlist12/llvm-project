@@ -96,6 +96,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <iostream>
 
 #define KDFSAN true
 
@@ -2090,9 +2091,22 @@ Value *DFSanFunction::combineShadows(Value *V1, Value *V2,
   Value *PV1 = collapseToPrimitiveShadow(V1, Pos);
   Value *PV2 = collapseToPrimitiveShadow(V2, Pos);
 
+  //p->cleanup is ok,p->op->cleanup is ok as well, but p->sk->op->cleanup is ruled out
+
   IRBuilder<> IRB(Pos->getParent(), Pos);
+
+  Value* one=ConstantInt::get(DFS.PrimitiveShadowTy,1);
+  Value* icmp=IRB.CreateICmpEQ(PV2,one,"cmp_pv2_eq_1");
+
+  Value *newPV2 = IRB.CreateSelect(
+        icmp,
+        ConstantInt::get(DFS.PrimitiveShadowTy, 2), // if PV2==1 , PV2=2
+        ConstantInt::get(DFS.PrimitiveShadowTy, 0), // else PV2=0
+        "select_pv2"
+    );
+
   CCS.Block = Pos->getParent();
-  CCS.Shadow = IRB.CreateOr(PV1, PV2);
+  CCS.Shadow = IRB.CreateOr(PV1, newPV2);
 
   std::set<Value *> UnionElems;
   if (V1Elems != ShadowElements.end()) {
