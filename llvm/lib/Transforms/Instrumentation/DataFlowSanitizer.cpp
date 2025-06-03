@@ -1250,7 +1250,7 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
   Type *DFSanWrapStoreArgs = { PrimitiveShadowTy };
   DFSanWrapStoreFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapStoreArgs, /*isVarArg=*/ false);
-  Type *DFSanWrapCallArgs = { PrimitiveShadowTy };
+  Type *DFSanWrapCallArgs[3] = { PrimitiveShadowTy, Int8Ptr, Int8Ptr };
   DFSanWrapCallFnTy = 
         FunctionType::get(Type::getVoidTy(*Ctx), DFSanWrapCallArgs, /*isVarArg=*/ false);
   Type *DFSanWrapKfreeArgs[2] = { PrimitiveShadowTy,Int8Ptr };
@@ -1396,7 +1396,7 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     AL = AL.addFnAttribute(C, Attribute::NoUnwind);
     AL = AL.addParamAttribute(C, 0,Attribute::ZExt);
     DFSanWrapCallFn = Mod->getOrInsertFunction(
-        "__dfsan_taint_wrapper_call", DFSanWrapStoreFnTy, AL);
+        "__dfsan_taint_wrapper_call", DFSanWrapCallFnTy, AL);
   }
   {
     AttributeList AL;
@@ -3480,8 +3480,25 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
     Module *M=CB.getModule();
     Value* Shadow=
         DFSF.getShadow(CB.getCalledOperand());
+    unsigned int argnum=CB.arg_size();
+    Value* ptr1=ConstantPointerNull::get(PointerType::getUnqual(*DFSF.DFS.Ctx));
+    Value* ptr2=ConstantPointerNull::get(PointerType::getUnqual(*DFSF.DFS.Ctx));
     IRBuilder<> IRB(&CB);
-    IRB.CreateCall(DFSF.DFS.DFSanWrapCallFn, {Shadow});
+    if(argnum==1){
+      if(CB.getArgOperand(0)->getType()->isPointerTy()){
+        ptr1=IRB.CreateBitCast(CB.getArgOperand(0), PointerType::getUnqual(*DFSF.DFS.Ctx));
+      }
+    }
+    //Only test pre 2 args
+    if(argnum>=2){
+      if(CB.getArgOperand(0)->getType()->isPointerTy()){
+        ptr1=IRB.CreateBitCast(CB.getArgOperand(0), PointerType::getUnqual(*DFSF.DFS.Ctx));
+      }
+      if(CB.getArgOperand(1)->getType()->isPointerTy()){
+        ptr2=IRB.CreateBitCast(CB.getArgOperand(1), PointerType::getUnqual(*DFSF.DFS.Ctx));
+      }
+    }
+    IRB.CreateCall(DFSF.DFS.DFSanWrapCallFn, {Shadow,ptr1,ptr2});
   }
   if ((F && F->isIntrinsic()) || CB.isInlineAsm()) {
     visitInstOperands(CB);
