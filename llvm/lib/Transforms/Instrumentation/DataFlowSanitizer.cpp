@@ -2095,15 +2095,18 @@ Value *DFSanFunction::combineShadows(Value *V1, Value *V2,
 
   IRBuilder<> IRB(Pos->getParent(), Pos);
 
-  Value* one=ConstantInt::get(DFS.PrimitiveShadowTy,1);
-  Value* icmp=IRB.CreateICmpEQ(PV2,one,"cmp_pv2_eq_1");
+// PV2 & 1 != 0
+Value* bit1_mask = ConstantInt::get(DFS.PrimitiveShadowTy, 1);
+Value* bit1_set = IRB.CreateAnd(PV2, bit1_mask, "pv2_and_1");
+Value* cond = IRB.CreateICmpNE(bit1_set, ConstantInt::get(DFS.PrimitiveShadowTy, 0), "pv2_has_bit1");
 
-  Value *newPV2 = IRB.CreateSelect(
-        icmp,
-        ConstantInt::get(DFS.PrimitiveShadowTy, 2), // if PV2==1 , PV2=2
-        ConstantInt::get(DFS.PrimitiveShadowTy, 0), // else PV2=0
-        "select_pv2"
-    );
+// select: if (PV2 & 1) != 0 -> 2, else -> 0
+Value* newPV2 = IRB.CreateSelect(
+    cond,
+    ConstantInt::get(DFS.PrimitiveShadowTy, 2),
+    ConstantInt::get(DFS.PrimitiveShadowTy, 0),
+    "select_pv2"
+);
 
   CCS.Block = Pos->getParent();
   CCS.Shadow = IRB.CreateOr(PV1, newPV2);
@@ -3670,24 +3673,6 @@ PreservedAnalyses DataFlowSanitizerPass::run(Module &M,
   PA.abandon<GlobalsAA>();
   return PA;
 }
-
-/*
-PassPluginLibraryInfo getPassPluginInfo() {
-  const auto callback = [](PassBuilder &PB) {
-      PB.registerPipelineEarlySimplificationEPCallback([&](ModulePassManager &MPM,OptimizationLevel OL, ThinOrFullLTOPhase) {
-          MPM.addPass(DataFlowSanitizerPass());
-          return true;
-      });
-  };
-
-  return {LLVM_PLUGIN_API_VERSION, "DataFlowSanitizerPass", "0.0.1", callback};
-};
-
-extern "C" LLVM_ATTRIBUTE_WEAK PassPluginLibraryInfo llvmGetPassPluginInfo() {
-  return getPassPluginInfo();
-  
-}
-*/
 
 
 
