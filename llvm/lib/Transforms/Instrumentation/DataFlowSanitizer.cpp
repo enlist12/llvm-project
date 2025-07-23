@@ -109,8 +109,8 @@ static const Align MinOriginAlignment = Align(4);
 
 // The size of TLS variables. These constants must be kept in sync with the ones
 // in dfsan.cpp.
-static const unsigned ArgTLSSize = 800;
-static const unsigned RetvalTLSSize = 800;
+static const unsigned ArgTLSSize = 64;
+static const unsigned RetvalTLSSize = 1;
 
 // The -dfsan-preserve-alignment flag controls whether this pass assumes that
 // alignment requirements provided by the input IR are correct.  For example,
@@ -462,10 +462,8 @@ class DataFlowSanitizer {
   PointerType *PrimitiveShadowPtrTy;
   IntegerType *IntptrTy;
   ConstantInt *ZeroPrimitiveShadow;
-  Constant *ArgTLS;
   ArrayType *ArgOriginTLSTy;
   Constant *ArgOriginTLS;
-  Constant *RetvalTLS;
   Constant *RetvalOriginTLS;
   FunctionType *DFSanUnionLoadFnTy;
   FunctionType *DFSanLoadLabelAndOriginFnTy;
@@ -487,6 +485,8 @@ class DataFlowSanitizer {
   FunctionType *DFSanWrapKfreeFnTy;
   FunctionType *DFSanWrapKmemFnTy;
   FunctionType *DFSanCmpDetectFnTy;
+  FunctionType *DFSanGetArgTLSFnTy;
+  FunctionType *DFSanGetRetvalTLSFnTy;
   FunctionType *DFSanChainOriginFnTy;
   FunctionType *DFSanChainOriginIfTaintedFnTy;
   FunctionType *DFSanMemOriginTransferFnTy;
@@ -502,6 +502,8 @@ class DataFlowSanitizer {
   FunctionCallee DFSanWrapCallFn;
   FunctionCallee DFSanWrapKfreeFn;
   FunctionCallee DFSanWrapKmemFn;
+  FunctionCallee DFSanGetArgTLSFn;
+  FunctionCallee DFSanGetRetvalTLSFn;
   FunctionCallee DFSanNonzeroLabelFn;
   FunctionCallee DFSanVarargWrapperFn;
   FunctionCallee DFSanLoadCallbackFn;
@@ -1263,6 +1265,10 @@ bool DataFlowSanitizer::initializeModule(Module &M) {
                                  Type::getInt1Ty(*Ctx) };
   DFSanCmpDetectFnTy = FunctionType::get(
       Type::getInt1Ty(*Ctx), DFSanCmpDetectArgs, /*isVarArg=*/false);
+  DFSanGetArgTLSFnTy = FunctionType::get(
+      PrimitiveShadowPtrTy, {}, /*isVarArg=*/false);
+  DFSanGetRetvalTLSFnTy = FunctionType::get(
+      PrimitiveShadowPtrTy, {}, /*isVarArg=*/false);
   ColdCallWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   OriginStoreWeights = MDBuilder(*Ctx).createUnlikelyBranchWeights();
   return true;
@@ -1422,6 +1428,10 @@ void DataFlowSanitizer::initializeRuntimeFunctions(Module &M) {
     DFSanCmpDetectFn =
         Mod->getOrInsertFunction("__dfsan_cmp_detect", DFSanCmpDetectFnTy, AL);
   }
+  DFSanGetArgTLSFn =
+      Mod->getOrInsertFunction("__dfsan_get_arg", DFSanGetArgTLSFnTy);
+  DFSanGetRetvalTLSFn =
+      Mod->getOrInsertFunction("__dfsan_get_retval", DFSanGetRetvalTLSFnTy);
   DFSanUnimplementedFn =
       Mod->getOrInsertFunction("__dfsan_unimplemented", DFSanUnimplementedFnTy);
   DFSanWrapperExternWeakNullFn = Mod->getOrInsertFunction(
@@ -1602,12 +1612,6 @@ bool DataFlowSanitizer::runImpl(
   };
 
   // These globals must be kept in sync with the ones in dfsan.cpp.
-  ArgTLS =
-      GetOrInsertGlobal("__dfsan_arg_tls",
-                        ArrayType::get(Type::getInt64Ty(*Ctx), ArgTLSSize / 8));
-  RetvalTLS = GetOrInsertGlobal(
-      "__dfsan_retval_tls",
-      ArrayType::get(Type::getInt64Ty(*Ctx), RetvalTLSSize / 8));
   ArgOriginTLSTy = ArrayType::get(OriginTy, NumOfElementsInArgOrgTLS);
   ArgOriginTLS = GetOrInsertGlobal("__dfsan_arg_origin_tls", ArgOriginTLSTy);
   RetvalOriginTLS = GetOrInsertGlobal("__dfsan_retval_origin_tls", OriginTy);
@@ -1873,14 +1877,16 @@ bool DataFlowSanitizer::runImpl(
 }
 
 Value *DFSanFunction::getArgTLS(Type *T, unsigned ArgOffset, IRBuilder<> &IRB) {
-  Value *Base = IRB.CreatePointerCast(DFS.ArgTLS, DFS.IntptrTy);
+  Value *Base = IRB.CreateCall(DFS.DFSanGetArgTLSFn, {});
+  Base = IRB.CreatePointerCast(Base,DFS.IntptrTy);
   if (ArgOffset)
     Base = IRB.CreateAdd(Base, ConstantInt::get(DFS.IntptrTy, ArgOffset));
   return IRB.CreateIntToPtr(Base, PointerType::get(*DFS.Ctx, 0), "_dfsarg");
 }
 
 Value *DFSanFunction::getRetvalTLS(Type *T, IRBuilder<> &IRB) {
-  return IRB.CreatePointerCast(DFS.RetvalTLS, PointerType::get(*DFS.Ctx, 0),
+  Value *Base = IRB.CreateCall(DFS.DFSanGetRetvalTLSFn, {});
+  return IRB.CreatePointerCast(Base, PointerType::get(*DFS.Ctx, 0),
                                "_dfsret");
 }
 
@@ -1984,7 +1990,7 @@ void DFSanFunction::setShadow(Instruction *I, Value *Shadow) {
 ///
 /// Offset = (Addr & ~AndMask) ^ XorMask
 Value *DataFlowSanitizer::getShadowOffset(Value *Addr, IRBuilder<> &IRB) {
-  assert(Addr != RetvalTLS && "Reinstrumenting?");
+  //assert(Addr != RetvalTLS && "Reinstrumenting?");
   Value *OffsetLong = IRB.CreatePointerCast(Addr, IntptrTy);
 
   uint64_t AndMask = MapParams->AndMask;
